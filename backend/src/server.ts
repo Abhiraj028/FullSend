@@ -1,47 +1,75 @@
 import type { Server, ServerWebSocket } from "bun";
 
-const currentPeers = new Map<ServerWebSocket,string>();
-let arr : string[] = [];
+const currentPeers = new Map<ServerWebSocket, string>();
+let arr: string[] = [];
 
 Bun.serve({
-    port: 8080,
-    fetch(req,server){
-        if(server.upgrade(req)){
-            return;
-        }
-        return new Response("Upgrade failed", {status: 500});
+  port: 8080,
+  fetch(req, server) {
+    if (server.upgrade(req)) return;
+    return new Response("Upgrade failed", { status: 500 });
+  },
+  websocket: {
+    open(ws) {
+      ws.send("Server connection open");
     },
-    websocket:{
 
-        open(ws){
-            ws.send("Server generated message. Connection has been open to the server. ");      
-        },
+    message(ws, message) {
+      try {
+        const msg = JSON.parse(message as string);
 
-        message(ws, message){
-            const msg = message as string;
-            console.log("Received message from client:", msg);
-
-            if(msg.startsWith("$pid->") && !arr.includes(msg.slice(6))){
-                arr.push(message as string);
-                currentPeers.set(ws, message as string);
-                
-                for (const peerWs of currentPeers.keys()) {
-                    peerWs.send(JSON.stringify(arr));
-                }
+        switch (msg.type) {
+          case "pid":
+            if (!arr.includes(msg.id)) {
+              arr.push(msg.id);
+              currentPeers.set(ws, msg.id);
+              console.log("Peer registered:", msg.id, "| Total:", arr.length);
+              broadcast();
             }
-        },
+            break;
 
-        close(ws, code, reason){
-            const PID = currentPeers.get(ws);
-            currentPeers.delete(ws);
-            arr = arr.filter(item => item !== PID);
+          case "connReq":
+            console.log("connReq:", msg.sender, "->", msg.receiver);
+            forward(msg.receiver, message as string);
+            break;
 
-            for (const peerWs of currentPeers.keys()) {
-                peerWs.send(JSON.stringify(arr));
-            }
+          case "connAccept":
+            console.log("connAccept:", msg.sender, "->", msg.receiver);
+            forward(msg.receiver, message as string);
+            break;
 
-            console.log("Websocket closed: ", code, reason);
-            ws.send("Connection closed: " + code + " - " + reason);
+          case "connReject":
+            console.log("connReject:", msg.sender, "->", msg.receiver);
+            forward(msg.receiver, message as string);
+            break;
         }
+      } catch {
+        console.log("Invalid JSON:", message);
+      }
     },
+
+    close(ws, code, reason) {
+      const PID = currentPeers.get(ws);
+      currentPeers.delete(ws);
+      arr = arr.filter((item) => item !== PID);
+      broadcast();
+      console.log("Websocket closed:", code, reason);
+    },
+  },
 });
+
+function broadcast() {
+  const payload = JSON.stringify({ type: "peerList", peers: arr });
+  for (const peerWs of currentPeers.keys()) {
+    peerWs.send(payload);
+  }
+}
+
+function forward(targetId: string, message: string) {
+  for (const [peerWs, id] of currentPeers) {
+    if (id === targetId) {
+      peerWs.send(message);
+      break;
+    }
+  }
+}
