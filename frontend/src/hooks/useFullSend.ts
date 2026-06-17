@@ -1,20 +1,34 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useCallback } from "react";
 import Peer from "peerjs";
 
 export type ConnectionStatus = "idle" | "connecting" | "connected" | "rejected";
 
-export function useFullSend() {
+export type PeerInfo = {
+  id: string;
+  nickname: string;
+};
+
+type PendingRequest = {
+  sender: string;
+  receiver: string;
+  senderNickname?: string;
+};
+
+export function useFullSend(initialNickname: string) {
   const [myPeerId, setMyPeerId] = useState<string>("");
+  const [myNickname, setMyNickname] = useState(initialNickname);
   const [remotePeerId, setRemotePeerId] = useState<string>("");
-  const [availablePeerIds, setAvailablePeerIds] = useState<string[]>([]);
+  const [availablePeers, setAvailablePeers] = useState<PeerInfo[]>([]);
   const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>("idle");
   const [connectedPeerId, setConnectedPeerId] = useState<string | null>(null);
-  const [pendingRequest, setPendingRequest] = useState<{
-    sender: string;
-    receiver: string;
-  } | null>(null);
+  const [pendingRequest, setPendingRequest] = useState<PendingRequest | null>(null);
   const peerRef = useRef<Peer | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
+
+  const nicknameMap: Record<string, string> = {};
+  for (const p of availablePeers) {
+    nicknameMap[p.id] = p.nickname;
+  }
 
   useEffect(() => {
     const peer = new Peer();
@@ -22,12 +36,12 @@ export function useFullSend() {
 
     peer.on("open", (id) => {
       setMyPeerId(id);
-      const ws = new WebSocket("ws://localhost:8080");
+      const ws = new WebSocket(`ws://${location.hostname}:8080`);
       wsRef.current = ws;
 
       ws.onopen = () => {
         console.log("Websocket connection opened");
-        ws.send(JSON.stringify({ type: "pid", id }));
+        ws.send(JSON.stringify({ type: "pid", id, nickname: initialNickname }));
       };
 
       ws.onmessage = (event) => {
@@ -36,14 +50,14 @@ export function useFullSend() {
 
           switch (msg.type) {
             case "peerList":
-              setAvailablePeerIds(msg.peers);
+              setAvailablePeers(msg.peers);
               break;
 
             case "connReq":
               if (pendingRequest) {
                 console.warn("Dropped pending request from", pendingRequest.sender, "- new request from", msg.sender);
               }
-              setPendingRequest({ sender: msg.sender, receiver: msg.receiver });
+              setPendingRequest({ sender: msg.sender, receiver: msg.receiver, senderNickname: msg.senderNickname });
               break;
 
             case "connAccept":
@@ -87,6 +101,7 @@ export function useFullSend() {
         type: "connReq",
         sender: myPeerId,
         receiver: remotePeerId,
+        senderNickname: myNickname,
       })
     );
   };
@@ -98,6 +113,7 @@ export function useFullSend() {
         type: "connAccept",
         sender: myPeerId,
         receiver: pendingRequest.sender,
+        senderNickname: myNickname,
       })
     );
     setConnectionStatus("connected");
@@ -112,16 +128,30 @@ export function useFullSend() {
         type: "connReject",
         sender: myPeerId,
         receiver: pendingRequest.sender,
+        senderNickname: myNickname,
       })
     );
     setConnectionStatus("idle");
     setPendingRequest(null);
   };
 
+  const updateNickname = useCallback((newName: string) => {
+    setMyNickname(newName);
+    wsRef.current?.send(
+      JSON.stringify({
+        type: "nicknameUpdate",
+        id: myPeerId,
+        nickname: newName,
+      })
+    );
+  }, [myPeerId]);
+
   return {
     myPeerId,
     remotePeerId,
-    availablePeerIds,
+    availablePeers,
+    myNickname,
+    nicknameMap,
     connectionStatus,
     connectedPeerId,
     pendingRequest,
@@ -129,5 +159,6 @@ export function useFullSend() {
     handleConnect,
     acceptRequest,
     rejectRequest,
+    updateNickname,
   };
 }
