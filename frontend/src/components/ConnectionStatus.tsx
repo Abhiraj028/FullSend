@@ -1,9 +1,10 @@
-import type { ConnectionStatus as Status } from "@/hooks/useFullSend";
+import type { ConnectionStatus as Status, ConnectionErrorType } from "@/hooks/useFullSend";
 
 type ConnectionStatusProps = {
   status: Status;
   peerId: string | null;
   nicknameMap: Record<string, string>;
+  connectionError?: ConnectionErrorType | null;
 };
 
 function resolve(peerId: string | null, nicknameMap: Record<string, string>) {
@@ -11,8 +12,8 @@ function resolve(peerId: string | null, nicknameMap: Record<string, string>) {
   return nicknameMap[peerId] ?? peerId;
 }
 
-export function ConnectionStatus({ status, peerId, nicknameMap }: ConnectionStatusProps) {
-  if (status === "idle") return null;
+export function ConnectionStatus({ status, peerId, nicknameMap, connectionError }: ConnectionStatusProps) {
+  if (status === "idle" || connectionError) return null;
   const name = resolve(peerId, nicknameMap);
 
   return (

@@ -1,14 +1,16 @@
 import { useEffect, useRef, useState, useCallback } from "react";
-import Peer from "peerjs";
+import Peer, { type DataConnection } from "peerjs";
 
 export type ConnectionStatus = "idle" | "connecting" | "connected" | "rejected";
+
+export type ConnectionErrorType = "accept_timeout" | "connect_timeout";
 
 export type PeerInfo = {
   id: string;
   nickname: string;
 };
 
-type PendingRequest = {
+export type PendingRequest = {
   sender: string;
   receiver: string;
   senderNickname?: string;
@@ -22,8 +24,14 @@ export function useFullSend(initialNickname: string) {
   const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>("idle");
   const [connectedPeerId, setConnectedPeerId] = useState<string | null>(null);
   const [pendingRequest, setPendingRequest] = useState<PendingRequest | null>(null);
+  const [dataConn, setDataConn] = useState<DataConnection | null>(null);
+  const [connectionError, setConnectionError] = useState<ConnectionErrorType | null>(null);
   const peerRef = useRef<Peer | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
+  const retryRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const acceptTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const connectTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const dataConnRef = useRef<DataConnection | null>(null);
 
   const nicknameMap: Record<string, string> = {};
   for (const p of availablePeers) {
@@ -31,15 +39,14 @@ export function useFullSend(initialNickname: string) {
   }
 
   useEffect(() => {
-    const peer = new Peer();
-    peerRef.current = peer;
+    let retryDelay = 1000;
 
-    peer.on("open", (id) => {
-      setMyPeerId(id);
+    const connectWs = (id: string) => {
       const ws = new WebSocket(`ws://${location.hostname}:8080`);
       wsRef.current = ws;
 
       ws.onopen = () => {
+        retryDelay = 1000;
         console.log("Websocket connection opened");
         ws.send(JSON.stringify({ type: "pid", id, nickname: initialNickname }));
       };
@@ -54,40 +61,70 @@ export function useFullSend(initialNickname: string) {
               break;
 
             case "connReq":
-              if (pendingRequest) {
-                console.warn("Dropped pending request from", pendingRequest.sender, "- new request from", msg.sender);
-              }
               setPendingRequest({ sender: msg.sender, receiver: msg.receiver, senderNickname: msg.senderNickname });
               break;
 
             case "connAccept":
               setConnectionStatus("connected");
               setConnectedPeerId(msg.sender);
+              setConnectionError(null);
               {
                 const conn = peerRef.current?.connect(msg.sender);
-                conn?.on("open", () => {
-                  conn.send("Hello from " + id);
-                });
+                if (conn) {
+                  dataConnRef.current = conn;
+                    conn.on("open", () => {
+                    setDataConn(conn);
+                    clearTimeout(connectTimerRef.current);
+                    setConnectionError(null);
+                  });
+                  conn.on("close", () => setDataConn(null));
+                }
               }
               break;
 
             case "connReject":
               setConnectionStatus("rejected");
+              setConnectionError(null);
+              clearTimeout(connectTimerRef.current);
               break;
           }
         } catch {
           console.log("Non-JSON message:", event.data);
         }
       };
+
+      ws.onclose = () => {
+        console.log("Websocket closed, reconnecting in", retryDelay, "ms");
+        retryRef.current = setTimeout(() => {
+          connectWs(id);
+          retryDelay = Math.min(retryDelay * 2, 30000);
+        }, retryDelay);
+      };
+    };
+
+    const peer = new Peer();
+    peerRef.current = peer;
+
+    peer.on("open", (id) => {
+      setMyPeerId(id);
+      connectWs(id);
     });
 
     peer.on("connection", (conn) => {
-      conn.on("data", (data) => {
-        console.log("Got data from " + conn.peer + " : " + data);
+      dataConnRef.current = conn;
+      conn.on("open", () => {
+        setDataConn(conn);
+        clearTimeout(acceptTimerRef.current);
+        clearTimeout(connectTimerRef.current);
+        setConnectionError(null);
       });
+      conn.on("close", () => setDataConn(null));
     });
 
     return () => {
+      clearTimeout(retryRef.current);
+      clearTimeout(acceptTimerRef.current);
+      clearTimeout(connectTimerRef.current);
       peer.destroy();
       wsRef.current?.close();
     };
@@ -96,6 +133,7 @@ export function useFullSend(initialNickname: string) {
   const handleConnect = () => {
     if (!remotePeerId) return;
     setConnectionStatus("connecting");
+    setConnectionError(null);
     wsRef.current?.send(
       JSON.stringify({
         type: "connReq",
@@ -104,10 +142,18 @@ export function useFullSend(initialNickname: string) {
         senderNickname: myNickname,
       })
     );
+    clearTimeout(connectTimerRef.current);
+    connectTimerRef.current = setTimeout(() => {
+      if (!dataConnRef.current) {
+        setConnectionStatus("rejected");
+        setConnectionError("connect_timeout");
+      }
+    }, 15000);
   };
 
   const acceptRequest = () => {
     if (!pendingRequest) return;
+    setConnectionError(null);
     wsRef.current?.send(
       JSON.stringify({
         type: "connAccept",
@@ -119,6 +165,13 @@ export function useFullSend(initialNickname: string) {
     setConnectionStatus("connected");
     setConnectedPeerId(pendingRequest.sender);
     setPendingRequest(null);
+    clearTimeout(acceptTimerRef.current);
+    acceptTimerRef.current = setTimeout(() => {
+      if (!dataConnRef.current) {
+        setConnectionStatus("rejected");
+        setConnectionError("accept_timeout");
+      }
+    }, 10000);
   };
 
   const rejectRequest = () => {
@@ -146,6 +199,24 @@ export function useFullSend(initialNickname: string) {
     );
   }, [myPeerId]);
 
+  const sendToPeer = useCallback((data: unknown) => {
+    dataConnRef.current?.send(data);
+  }, []);
+
+  const clearConnectionError = useCallback(() => setConnectionError(null), []);
+
+  const disconnect = useCallback(() => {
+    dataConnRef.current?.close();
+    dataConnRef.current = null;
+    setDataConn(null);
+    setConnectionStatus("idle");
+    setConnectedPeerId(null);
+    setConnectionError(null);
+    setPendingRequest(null);
+    clearTimeout(connectTimerRef.current);
+    clearTimeout(acceptTimerRef.current);
+  }, []);
+
   return {
     myPeerId,
     remotePeerId,
@@ -155,10 +226,15 @@ export function useFullSend(initialNickname: string) {
     connectionStatus,
     connectedPeerId,
     pendingRequest,
+    dataConn,
+    connectionError,
     setRemotePeerId,
     handleConnect,
     acceptRequest,
     rejectRequest,
     updateNickname,
+    sendToPeer,
+    clearConnectionError,
+    disconnect,
   };
 }

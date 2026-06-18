@@ -13,7 +13,7 @@ export function PeerIdentity({ peerId, nickname }: { peerId: string; nickname?: 
               {nickname || "Initialising network..."}
             </span>
           </div>
-          {nickname && (
+          {peerId && (
             <code className="text-slate-500 font-mono text-[10px] block truncate pl-6">
               {peerId}
             </code>
