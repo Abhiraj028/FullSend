@@ -3,7 +3,7 @@ import { useNavigate, useParams } from "react-router-dom";
 import { ArrowLeft, Upload } from "lucide-react";
 import { usePeer } from "@/hooks/PeerContext";
 import { PeerCard, type Tracker } from "@/components/PeerCard";
-import { CHUNK_SIZE, FILE_META, FILE_CHUNK, FILE_DONE, FILE_ACK, arrayBufferToBase64, base64ToArrayBuffer, type FileReceiveState } from "@/lib/fileTransfer";
+import { CHUNK_SIZE, FILE_META, FILE_CHUNK, FILE_DONE, FILE_ACK, type FileReceiveState } from "@/lib/fileTransfer";
 
 export function TransferPage() {
   const { peerId } = useParams();
@@ -68,33 +68,33 @@ export function TransferPage() {
     const startTime = Date.now();
 
     for (const file of queuedFiles) {
-      const buffer = await file.arrayBuffer();
       const fileId = crypto.randomUUID();
-      const totalChunks = Math.ceil(buffer.byteLength / CHUNK_SIZE);
+      const totalChunks = Math.ceil(file.size / CHUNK_SIZE);
 
-      sendToPeer(JSON.stringify({
+      sendToPeer({
         type: FILE_META,
         id: fileId,
         name: file.name,
-        size: buffer.byteLength,
+        size: file.size,
         mimeType: file.type,
         totalChunks,
-      }));
+      });
 
       for (let i = 0; i < totalChunks; i++) {
         const start = i * CHUNK_SIZE;
-        const end = Math.min(start + CHUNK_SIZE, buffer.byteLength);
-        const chunk = buffer.slice(start, end);
+        const end = Math.min(start + CHUNK_SIZE, file.size);
+        const chunkBlob = file.slice(start, end);
+        const chunkBuffer = await chunkBlob.arrayBuffer();
 
-        sendToPeer(JSON.stringify({
+        sendToPeer({
           type: FILE_CHUNK,
           id: fileId,
           index: i,
           total: totalChunks,
-          data: arrayBufferToBase64(chunk),
-        }));
+          data: chunkBuffer,
+        });
 
-        bytesSent += chunk.byteLength;
+        bytesSent += chunkBuffer.byteLength;
         const elapsed = (Date.now() - startTime) / 1000;
         const speed = elapsed > 0
           ? `${(bytesSent / elapsed / 1024 / 1024).toFixed(1)} MB/s`
@@ -105,7 +105,7 @@ export function TransferPage() {
       }
 
       sentFilesRef.current.set(fileId, file.name);
-      sendToPeer(JSON.stringify({ type: FILE_DONE, id: fileId }));
+      sendToPeer({ type: FILE_DONE, id: fileId });
       sentFileNames.push(file.name);
     }
 
@@ -125,10 +125,8 @@ export function TransferPage() {
     receiveStateRef.current.clear();
 
     const handler = (raw: unknown) => {
-      if (typeof raw !== "string") return;
-
       try {
-        const msg = JSON.parse(raw);
+        const msg = typeof raw === "string" ? JSON.parse(raw) : raw as any;
 
         switch (msg.type) {
           case FILE_META:
@@ -145,7 +143,7 @@ export function TransferPage() {
           case FILE_CHUNK: {
             const state = receiveStateRef.current.get(msg.id);
             if (!state) break;
-            const buf = base64ToArrayBuffer(msg.data);
+            const buf = msg.data as ArrayBuffer;
             state.chunks.set(msg.index, buf);
             state.receivedBytes += buf.byteLength;
             break;
@@ -179,7 +177,7 @@ export function TransferPage() {
               sentNames: [...prev.sentNames, state.name],
             }));
 
-            sendToPeer(JSON.stringify({ type: FILE_ACK, id: msg.id }));
+            sendToPeer({ type: FILE_ACK, id: msg.id });
             receiveStateRef.current.delete(msg.id);
             break;
           }

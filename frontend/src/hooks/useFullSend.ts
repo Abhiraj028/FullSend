@@ -42,7 +42,8 @@ export function useFullSend(initialNickname: string) {
     let retryDelay = 1000;
 
     const connectWs = (id: string) => {
-      const ws = new WebSocket(`ws://${location.hostname}:8080`);
+      const protocol = location.protocol === "https:" ? "wss:" : "ws:";
+      const ws = new WebSocket(`${protocol}//${location.hostname}:8080`);
       wsRef.current = ws;
 
       ws.onopen = () => {
@@ -95,6 +96,7 @@ export function useFullSend(initialNickname: string) {
 
       ws.onclose = () => {
         console.log("Websocket closed, reconnecting in", retryDelay, "ms");
+        setAvailablePeers([]);
         retryRef.current = setTimeout(() => {
           connectWs(id);
           retryDelay = Math.min(retryDelay * 2, 30000);
