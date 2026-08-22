@@ -1,9 +1,0 @@
-{
-  "name": "fullsend-workspace",
-  "private": true,
-  "workspaces": [
-    "frontend",
-    "backend",
-    "shared"
-  ]
-}
