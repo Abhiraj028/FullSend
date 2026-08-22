@@ -1,8 +1,8 @@
 import type { Server, ServerWebSocket } from "bun";
+import { parseClientMessage } from "@fullsend/shared";
 
 const currentPeers = new Map<ServerWebSocket, string>();
 const nicknames = new Map<string, string>();
-let arr: string[] = [];
 
 Bun.serve({
   hostname: "0.0.0.0",
@@ -17,61 +17,55 @@ Bun.serve({
     },
 
     message(ws, message) {
-      try {
-        const msg = JSON.parse(message as string);
+      const msg = parseClientMessage(message as string); //helper in shared
+      if (!msg) {
+        console.log("Invalid JSON or unknown message type:", message);
+        return;
+      }
 
-        switch (msg.type) {
-          case "pid":
-            if (!arr.includes(msg.id)) {
-              arr.push(msg.id);
-              currentPeers.set(ws, msg.id);
-              if (msg.nickname) {
-                nicknames.set(msg.id, msg.nickname);
-              }
-              console.log("Peer registered:", msg.id, "| Nickname:", msg.nickname, "| Total:", arr.length);
-              broadcast();
-            }
-            break;
-
-          case "nicknameUpdate":
+      switch (msg.type) { //switch based updation of the maps.
+        case "pid": {
+          const isNew = !Array.from(currentPeers.values()).includes(msg.id);
+          currentPeers.set(ws, msg.id);
+          if (msg.nickname) {
             nicknames.set(msg.id, msg.nickname);
-            console.log("Nickname updated:", msg.id, "→", msg.nickname);
+          }
+          if (isNew) {
+            console.log("Peer registered:", msg.id, "| Nickname:", msg.nickname, "| Total:", currentPeers.size);
             broadcast();
-            break;
-
-          case "connReq":
-            console.log("connReq:", msg.sender, "->", msg.receiver);
-            forward(msg.receiver, message as string);
-            break;
-
-          case "connAccept":
-            console.log("connAccept:", msg.sender, "->", msg.receiver);
-            forward(msg.receiver, message as string);
-            break;
-
-          case "connReject":
-            console.log("connReject:", msg.sender, "->", msg.receiver);
-            forward(msg.receiver, message as string);
-            break;
+          }
+          break;
         }
-      } catch {
-        console.log("Invalid JSON:", message);
+
+        case "nicknameUpdate":
+          nicknames.set(msg.id, msg.nickname);
+          console.log("Nickname updated:", msg.id, "→", msg.nickname);
+          broadcast();
+          break;
+
+        case "connReq":
+        case "connAccept":
+        case "connReject":
+          console.log(`${msg.type}:`, msg.sender, "->", msg.receiver);
+          forward(msg.receiver, message as string, msg.sender);
+          break;
       }
     },
 
     close(ws, code, reason) {
       const PID = currentPeers.get(ws);
-      currentPeers.delete(ws);
-      nicknames.delete(PID!);
-      arr = arr.filter((item) => item !== PID);
-      broadcast();
-      console.log("Websocket closed:", code, reason);
+      if (PID) {
+        currentPeers.delete(ws);
+        nicknames.delete(PID);
+        broadcast(); // updates the peerlist
+        console.log("Websocket closed:", code, reason);
+      }
     },
   },
 });
 
 function broadcast() {
-  const peerList = arr.map((id) => ({
+  const peerList = Array.from(currentPeers.values()).map((id) => ({
     id,
     nickname: nicknames.get(id) ?? id,
   }));
@@ -81,11 +75,11 @@ function broadcast() {
   }
 }
 
-function forward(targetId: string, message: string) {
+function forward(targetId: string, message: string, senderId: string) {
   const parsed = JSON.parse(message);
-  parsed.senderNickname = nicknames.get(parsed.sender) ?? parsed.sender;
+  parsed.senderNickname = nicknames.get(senderId) ?? senderId;
   const enriched = JSON.stringify(parsed);
-  for (const [peerWs, id] of currentPeers) {
+  for (const [peerWs, id] of currentPeers) { // should be switched to id first for O1 lookup
     if (id === targetId) {
       peerWs.send(enriched);
       break;

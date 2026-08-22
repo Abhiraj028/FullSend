@@ -1,53 +1,67 @@
 import { useState, useRef, useCallback, useEffect } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import { ArrowLeft, Upload } from "lucide-react";
+import { ArrowLeft, Upload, X } from "lucide-react";
 import { usePeer } from "@/hooks/PeerContext";
-import { PeerCard, type Tracker } from "@/components/PeerCard";
-import { CHUNK_SIZE, FILE_META, FILE_CHUNK, FILE_DONE, FILE_ACK, type FileReceiveState } from "@/lib/fileTransfer";
+import { PeerCard } from "@/components/PeerCard";
+import { useFileTransfer } from "@/hooks/useFileTransfer";
 
 export function TransferPage() {
   const { peerId } = useParams();
   const navigate = useNavigate();
-  const { myNickname, nicknameMap, dataConn, sendToPeer, disconnect } = usePeer();
-  const peerName = nicknameMap[peerId ?? ""] ?? peerId ?? "Unknown";
+  const { myNickname, nicknameMap, dataConn, disconnect, connectedPeerId } = usePeer();
+  
+  // T12: Recover from session storage if we lose state on refresh
+  const [peerName, setPeerName] = useState(() => {
+    const saved = sessionStorage.getItem("fullsend_peer");
+    if (saved) {
+      const parsed = JSON.parse(saved);
+      if (parsed.peerId === peerId) return parsed.peerName;
+    }
+    return nicknameMap[peerId ?? ""] ?? peerId ?? "Unknown";
+  });
+
+  useEffect(() => {
+    if (peerId && nicknameMap[peerId]) {
+      const name = nicknameMap[peerId];
+      setPeerName(name);
+      sessionStorage.setItem("fullsend_peer", JSON.stringify({ peerId, peerName: name }));
+    }
+  }, [peerId, nicknameMap]);
+
   const inputRef = useRef<HTMLInputElement>(null);
 
   const [queuedFiles, setQueuedFiles] = useState<File[]>([]);
-  const [sendState, setSendState] = useState<"idle" | "sending" | "sent">("idle");
-  const [progress, setProgress] = useState<{
-    current: number;
-    total: number;
-    filename: string;
-    speed: string;
-  } | null>(null);
+  const [connectionLost, setConnectionLost] = useState(!dataConn);
+  const hadDataConnRef = useRef(!!dataConn);
 
-  const [myTracker, setMyTracker] = useState<Tracker>({ sentNames: [], receivedNames: [] });
-  const [remoteTracker, setRemoteTracker] = useState<Tracker>({ sentNames: [], receivedNames: [] });
-  const [connectionLost, setConnectionLost] = useState(false);
-  const hadDataConnRef = useRef(false);
+  const { sendState, progress, myTracker, remoteTracker, sendFiles } = useFileTransfer(dataConn);
 
   useEffect(() => {
     if (dataConn) {
       hadDataConnRef.current = true;
       setConnectionLost(false);
-    } else if (hadDataConnRef.current) {
+    } else if (hadDataConnRef.current || !dataConn) {
       setConnectionLost(true);
     }
   }, [dataConn]);
 
-  useEffect(() => {
-    if (!dataConn && !hadDataConnRef.current) {
-      setConnectionLost(true);
-    }
-  }, []);
-
   const handleDisconnect = () => {
     disconnect();
+    sessionStorage.removeItem("fullsend_peer");
     navigate("/");
   };
 
   const handleFiles = useCallback((files: FileList | File[]) => {
-    setQueuedFiles((prev) => [...prev, ...Array.from(files)]);
+    const newFiles = Array.from(files);
+    // T10: Add pre-send size validation (warn if single file > 2GB)
+    const validFiles = newFiles.filter(f => {
+      if (f.size > 2 * 1024 * 1024 * 1024) {
+        alert(`File ${f.name} is too large (> 2GB) and may crash the browser.`);
+        return false;
+      }
+      return true;
+    });
+    setQueuedFiles((prev) => [...prev, ...validFiles]);
   }, []);
 
   const handleDrop = (e: React.DragEvent) => {
@@ -55,153 +69,14 @@ export function TransferPage() {
     if (e.dataTransfer.files.length) handleFiles(e.dataTransfer.files);
   };
 
-  const receiveStateRef = useRef<Map<string, FileReceiveState>>(new Map());
-  const sentFilesRef = useRef<Map<string, string>>(new Map());
-
-  const handleSend = async () => {
-    if (sendState !== "idle" || queuedFiles.length === 0 || !dataConn) return;
-    setSendState("sending");
-
-    const totalBytes = queuedFiles.reduce((s, f) => s + f.size, 0);
-    const sentFileNames: string[] = [];
-    let bytesSent = 0;
-    const startTime = Date.now();
-
-    for (const file of queuedFiles) {
-      const fileId = crypto.randomUUID();
-      const totalChunks = Math.ceil(file.size / CHUNK_SIZE);
-
-      sendToPeer({
-        type: FILE_META,
-        id: fileId,
-        name: file.name,
-        size: file.size,
-        mimeType: file.type,
-        totalChunks,
-      });
-
-      for (let i = 0; i < totalChunks; i++) {
-        const start = i * CHUNK_SIZE;
-        const end = Math.min(start + CHUNK_SIZE, file.size);
-        const chunkBlob = file.slice(start, end);
-        const chunkBuffer = await chunkBlob.arrayBuffer();
-
-        sendToPeer({
-          type: FILE_CHUNK,
-          id: fileId,
-          index: i,
-          total: totalChunks,
-          data: chunkBuffer,
-        });
-
-        bytesSent += chunkBuffer.byteLength;
-        const elapsed = (Date.now() - startTime) / 1000;
-        const speed = elapsed > 0
-          ? `${(bytesSent / elapsed / 1024 / 1024).toFixed(1)} MB/s`
-          : "...";
-
-        setProgress({ current: bytesSent, total: totalBytes, filename: file.name, speed });
-        await new Promise((r) => setTimeout(r, 5));
-      }
-
-      sentFilesRef.current.set(fileId, file.name);
-      sendToPeer({ type: FILE_DONE, id: fileId });
-      sentFileNames.push(file.name);
-    }
-
-    setMyTracker((prev) => ({
-      ...prev,
-      sentNames: [...prev.sentNames, ...sentFileNames],
-    }));
-    setSendState("sent");
-    setQueuedFiles([]);
-    setProgress(null);
-    setTimeout(() => setSendState("idle"), 1500);
+  const removeFile = (index: number, e: React.MouseEvent) => {
+    e.stopPropagation();
+    setQueuedFiles(prev => prev.filter((_, i) => i !== index));
   };
 
-  useEffect(() => {
-    if (!dataConn) return;
-
-    receiveStateRef.current.clear();
-
-    const handler = (raw: unknown) => {
-      try {
-        const msg = typeof raw === "string" ? JSON.parse(raw) : raw as any;
-
-        switch (msg.type) {
-          case FILE_META:
-            receiveStateRef.current.set(msg.id, {
-              name: msg.name,
-              size: msg.size,
-              mimeType: msg.mimeType,
-              totalChunks: msg.totalChunks,
-              chunks: new Map(),
-              receivedBytes: 0,
-            });
-            break;
-
-          case FILE_CHUNK: {
-            const state = receiveStateRef.current.get(msg.id);
-            if (!state) break;
-            const buf = msg.data as ArrayBuffer;
-            state.chunks.set(msg.index, buf);
-            state.receivedBytes += buf.byteLength;
-            break;
-          }
-
-          case FILE_DONE: {
-            const state = receiveStateRef.current.get(msg.id);
-            if (!state) break;
-
-            const chunks: ArrayBuffer[] = [];
-            for (let i = 0; i < state.totalChunks; i++) {
-              const c = state.chunks.get(i);
-              if (c) chunks.push(c);
-            }
-
-            const blob = new Blob(chunks, { type: state.mimeType });
-            const url = URL.createObjectURL(blob);
-            const a = document.createElement("a");
-            a.href = url;
-            a.download = state.name;
-            a.click();
-            URL.revokeObjectURL(url);
-
-            setMyTracker((prev) => ({
-              ...prev,
-              receivedNames: [...prev.receivedNames, state.name],
-            }));
-
-            setRemoteTracker((prev) => ({
-              ...prev,
-              sentNames: [...prev.sentNames, state.name],
-            }));
-
-            sendToPeer({ type: FILE_ACK, id: msg.id });
-            receiveStateRef.current.delete(msg.id);
-            break;
-          }
-
-          case FILE_ACK: {
-            const fileName = sentFilesRef.current.get(msg.id);
-            if (fileName) {
-              setRemoteTracker((prev) => ({
-                ...prev,
-                receivedNames: [...prev.receivedNames, fileName],
-              }));
-              sentFilesRef.current.delete(msg.id);
-            }
-            break;
-          }
-        }
-      } catch {}
-    };
-
-    dataConn.on("data", handler);
-    return () => {
-      dataConn.off("data", handler);
-    };
-  }, [dataConn]);
+  const handleSend = () => {
+    sendFiles(queuedFiles).then(() => setQueuedFiles([]));
+  };
 
   const sendLabel =
     sendState === "idle" ? "send" : sendState === "sending" ? "sending..." : "sent!";
@@ -224,12 +99,14 @@ export function TransferPage() {
 
         {connectionLost && (
           <div className="bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 text-center">
-            <p className="text-sm font-medium text-amber-700">Connection lost — data channel closed</p>
+            <p className="text-sm font-medium text-amber-700">
+              {hadDataConnRef.current ? "Connection lost — data channel closed" : "Session interrupted — not connected"}
+            </p>
             <button
               onClick={handleDisconnect}
               className="mt-1 text-xs text-amber-600 underline hover:text-amber-800 transition-colors cursor-pointer"
             >
-              Back to lobby
+              Back to lobby to reconnect
             </button>
           </div>
         )}
@@ -281,18 +158,19 @@ export function TransferPage() {
         )}
 
         {queuedFiles.length > 0 && sendState === "idle" && (
-          <p className="relative group text-xs text-slate-400 text-center -mt-3">
-            <span className="border-b border-dashed border-slate-300 cursor-pointer">
-              {queuedFiles.length} file{queuedFiles.length > 1 ? "s" : ""} selected
-            </span>
-            <span className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 hidden group-hover:block z-10">
-              <span className="bg-slate-900 text-white text-[11px] rounded-lg px-3 py-2 shadow-lg whitespace-nowrap block">
-                {queuedFiles.map((f) => (
-                  <span key={f.name} className="block text-slate-300">{f.name}</span>
-                ))}
-              </span>
-            </span>
-          </p>
+          <div className="flex flex-wrap justify-center gap-2 -mt-3 relative z-10 max-h-32 overflow-y-auto p-2">
+            {queuedFiles.map((f, i) => (
+              <div key={i} className="flex items-center gap-1 bg-white border border-slate-200 rounded-full pl-3 pr-1 py-1 shadow-sm text-xs group">
+                <span className="truncate max-w-[120px] text-slate-600">{f.name}</span>
+                <button
+                  onClick={(e) => removeFile(i, e)}
+                  className="p-1 rounded-full hover:bg-slate-100 text-slate-400 hover:text-red-500 transition-colors"
+                >
+                  <X size={12} />
+                </button>
+              </div>
+            ))}
+          </div>
         )}
 
         <p

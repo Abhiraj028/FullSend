@@ -12,7 +12,7 @@ export function NicknameModal({ onConfirm }: NicknameModalProps) {
     const trimmed = nickname.trim();
     if (!trimmed) return;
     localStorage.setItem("fullsend_nickname", trimmed);
-    onConfirm(trimmed);
+    onConfirm(trimmed); // this is setNickname via the main page.
   };
 
   return (
