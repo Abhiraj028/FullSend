@@ -72,7 +72,7 @@ export function usePeerConnection(sendMessage: SendMessage, onControlMessage: Co
         console.warn("Received unexpected data on file channel:", event.data);
       };
     }
-  }, [onControlMessage]);
+  }, [onControlMessage, onFileData]);
 
   const resetPeerConnection = useCallback((peerConnection: RTCPeerConnection) => {
     peerConnection.close();

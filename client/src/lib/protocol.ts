@@ -7,11 +7,6 @@ export type SignalPayload = {
   data: unknown;
 };
 
-export type PingMessage = {
-  type: "ping";
-  sentAt: number;
-};
-
 export type FileOfferMessage = {
   type: "file-offer";
   transferId: string;
@@ -32,7 +27,6 @@ export type FileRejectMessage = {
 };
 
 export type ControlMessage =
-  | PingMessage
   | FileOfferMessage
   | FileAcceptMessage
   | FileRejectMessage;
@@ -120,10 +114,6 @@ function isNonEmptyString(value: unknown): value is string {
 export function isControlMessage(value: unknown): value is ControlMessage {
   if (!isRecord(value) || typeof value.type !== "string") {
     return false;
-  }
-
-  if (value.type === "ping") {
-    return typeof value.sentAt === "number";
   }
 
   if (value.type === "file-offer") {

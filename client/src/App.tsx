@@ -36,7 +36,6 @@ function App() {
   const [joinStatus, setJoinStatus] = useState<JoinStatus>("idle");
   const [hasPendingJoinRequest, setHasPendingJoinRequest] = useState(false);
   const [lastMessage, setLastMessage] = useState("Waiting for the server...");
-  const [lastControlMessage, setLastControlMessage] = useState("No direct control messages received yet.",);
 
   const [outgoingOffer, setOutgoingOffer] = useState<OutgoingOffer | null>(null);
   const [incomingOffer, setIncomingOffer] = useState<FileOfferMessage | null>(null);
@@ -58,17 +57,11 @@ function App() {
   }, []);
 
   const handleControlMessage = useCallback((message: ControlMessage) => {
-    if (message.type === "ping") {
-      setLastControlMessage(
-        `Ping received directly. Sent at ${new Date(message.sentAt).toLocaleTimeString()}.`,
-      );
-      return;
-    }
 
     if (message.type === "file-offer") {
       setIncomingOffer(message);
       setIncomingDecision("pending");
-      setLastControlMessage(`Received an offer for ${message.name}.`);
+      setLastMessage(`Received an offer for ${message.name}.`);
       return;
     }
 
@@ -81,7 +74,6 @@ function App() {
         return { ...currentOffer, status: "accepted" };
       });
 
-      setLastControlMessage("Peer accepted the file offer.");
       setLastMessage("Peer accepted the file offer. Sending the file.");
       return;
     }
@@ -95,7 +87,6 @@ function App() {
         return { ...currentOffer, status: "rejected" };
       });
 
-      setLastControlMessage(`Peer rejected the offer: ${message.reason}`);
       setLastMessage(`Peer rejected the offer: ${message.reason}`);
     }
   }, []);
@@ -108,7 +99,7 @@ function App() {
     );
   }, []);
 
-  const { webRtcStatus, controlChannel, startHostConnection, handleSignal, sendControlMessage, controlChannelStatus, sendFileData } = usePeerConnection(sendMessage, handleControlMessage, handleFileData);
+  const { webRtcStatus, startHostConnection, handleSignal, sendControlMessage, controlChannelStatus, sendFileData } = usePeerConnection(sendMessage, handleControlMessage, handleFileData);
 
   const handleServerMessage = useCallback((message: ServerMessage) => {
     setLastMessage(message.type);
@@ -238,19 +229,6 @@ function App() {
     }
   }
 
-  function sendPing() {
-    const sent = sendControlMessage({
-      type: "ping",
-      sentAt: Date.now(),
-    });
-
-    setLastMessage(
-      sent
-        ? "Sent ping through the direct control channel."
-        : "The control channel is not ready yet.",
-    );
-  }
-
   function offerSelectedFile(event: ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0];
 
@@ -319,17 +297,6 @@ function App() {
     setLastMessage(`Rejected ${incomingOffer.name}.`);
   }
 
-  function sendBinaryProbe() {
-    const probe = new Uint8Array([70, 83, 49]).buffer;
-    const sent = sendFileData(probe);
-
-    setLastMessage(
-      sent
-        ? "Sent a binary probe through the direct file channel."
-        : "The file channel is not ready yet.",
-    );
-  }
-
   async function sendFirstFileChunk() {
     if (!outgoingOffer || outgoingOffer.status !== "accepted") {
       setLastMessage("A peer must accept the file before sending bytes.");
@@ -365,6 +332,12 @@ function App() {
         </div>
         <p className="hint">WebRTC: {webRtcStatus}</p>
 
+        {role && (
+          <p className="hint">
+            Direct control channel: {controlChannelStatus}
+          </p>
+        )}
+
         <RoomPanel
           connectionStatus={connectionStatus}
           roomId={roomId}
@@ -378,22 +351,6 @@ function App() {
           onApproveJoin={approveJoin}
           onRejectJoin={rejectJoin}
         />
-
-
-        {role && (
-          <section className="room">
-            <p className="label">
-              Control channel: {controlChannelStatus ?? "waiting"}
-            </p>
-            <button
-              onClick={sendPing}
-              disabled={controlChannelStatus !== "open"}
-            >
-              Send test ping
-            </button>
-            <p className="hint">{lastControlMessage}</p>
-          </section>
-        )}
 
         {role && controlChannelStatus === "open" && (
           <section className="room">
@@ -434,7 +391,9 @@ function App() {
                   )}
 
                   {incomingDecision === "accepted" && (
-                    <p className="hint">Accepted. Waiting for file data.</p>
+                    <p className="hint">
+                      Accepted. {lastFileData}
+                    </p>
                   )}
 
                   {incomingDecision === "rejected" && (
@@ -445,15 +404,6 @@ function App() {
             )}
           </section>
         )}
-
-        {role && controlChannelStatus === "open" && (
-          <section className="room">
-            <p className="label">File-channel binary probe</p>
-            <button onClick={sendBinaryProbe}>Send FS1 probe</button>
-            <p className="hint">{lastFileData}</p>
-          </section>
-        )}
-
 
         <p className="message">Last event: {lastMessage}</p>
       </section>
