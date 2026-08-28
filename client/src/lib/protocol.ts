@@ -20,6 +20,26 @@ export type FileAcceptMessage = {
   transferId: string;
 };
 
+export type FileCompleteMessage = {
+  type: "file-complete";
+  transferId: string;
+  byteCount: number;
+  sha256: string;
+};
+
+export type FileVerifiedMessage = {
+  type: "file-verified";
+  transferId: string;
+  sha256: string;
+};
+
+export type FileIntegrityFailedMessage = {
+  type: "file-integrity-failed";
+  transferId: string;
+  expectedHash: string;
+  actualHash: string;
+};
+
 export type FileRejectMessage = {
   type: "file-reject";
   transferId: string;
@@ -29,7 +49,10 @@ export type FileRejectMessage = {
 export type ControlMessage =
   | FileOfferMessage
   | FileAcceptMessage
-  | FileRejectMessage;
+  | FileRejectMessage
+  | FileCompleteMessage
+  | FileVerifiedMessage
+  | FileIntegrityFailedMessage;
 
 
 export type ClientMessage =
@@ -110,6 +133,10 @@ function isNonEmptyString(value: unknown): value is string {
   return typeof value === "string" && value.length > 0;
 }
 
+function isSha256(value: unknown): value is string {
+  return typeof value === "string" && /^[a-f0-9]{64}$/.test(value);
+}
+
 // Control-channel JSON is validated before the app acts on it.
 export function isControlMessage(value: unknown): value is ControlMessage {
   if (!isRecord(value) || typeof value.type !== "string") {
@@ -135,6 +162,31 @@ export function isControlMessage(value: unknown): value is ControlMessage {
     return (
       isNonEmptyString(value.transferId) &&
       isNonEmptyString(value.reason)
+    );
+  }
+
+  if (value.type === "file-complete") {
+    return (
+      isNonEmptyString(value.transferId) &&
+      typeof value.byteCount === "number" &&
+      Number.isSafeInteger(value.byteCount) &&
+      value.byteCount >= 0 &&
+      isSha256(value.sha256)
+    );
+  }
+
+  if (value.type === "file-verified") {
+    return (
+      isNonEmptyString(value.transferId) &&
+      isSha256(value.sha256)
+    );
+  }
+
+  if (value.type === "file-integrity-failed") {
+    return (
+      isNonEmptyString(value.transferId) &&
+      isSha256(value.expectedHash) &&
+      isSha256(value.actualHash)
     );
   }
 

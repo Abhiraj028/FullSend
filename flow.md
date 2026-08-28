@@ -70,3 +70,11 @@ host handleSignal() applies answer
 both sides exchange ICE candidates as they discover routes
           ↓
 WebRTC becomes connected
+
+## data transfer
+
+accepted file
+  → 64 KiB chunk
+  → wait if DataChannel buffer is too full
+  → next 64 KiB chunk
+  → receiver stores bytes and updates progress
