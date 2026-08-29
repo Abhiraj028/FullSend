@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useRef, useState, type ChangeEvent, } from "react";
 import "./App.css";
 import { RoomPanel } from "./components/RoomPanel";
+import { sha256Hex } from "./lib/hash";
 import { usePeerConnection } from "./hooks/usePeerConnection";
+import { TransferPanel } from "./components/TransferPanel";
 import {
   parseServerMessage,
   type ClientMessage,
@@ -23,8 +25,16 @@ const FILE_CHUNK_SIZE = 64 * 1024;
 type OutgoingOffer = {
   transferId: string;
   file: File;
-  status: "waiting" | "accepted" | "rejected";
+  status: "waiting" | "accepted" | "rejected" | "sending" | "chunks-sent" | "failed" | "complete-sent" | "hashing" | "verified";
 };
+
+function isTerminalTransferStatus(status: OutgoingOffer["status"]) {
+  return (
+    status === "verified" ||
+    status === "rejected" ||
+    status === "failed"
+  );
+}
 
 function App() {
   const socketRef = useRef<WebSocket | null>(null);
@@ -42,7 +52,26 @@ function App() {
 
   const [incomingDecision, setIncomingDecision] = useState<"pending" | "accepted" | "rejected" | null>(null);
 
-  const [lastFileData, setLastFileData] = useState("No binary file-channel data received yet.");
+  const receivedChunksRef = useRef<ArrayBuffer[]>([]);
+  const [receivedBytes, setReceivedBytes] = useState(0);
+  const [senderCompletedBytes, setSenderCompletedBytes] = useState<number | null>(null);
+  const [sentBytes, setSentBytes] = useState(0);
+
+  const [expectedHash, setExpectedHash] = useState<string | null>(null);
+  const [verificationStatus, setVerificationStatus] = useState<"idle" | "verifying" | "verified" | "failed">("idle");
+
+  const verificationStartedRef = useRef<string | null>(null);
+
+  type CompletedDownload = {
+    name: string;
+    url: string;
+  };
+
+  const [completedDownload, setCompletedDownload] =
+    useState<CompletedDownload | null>(null);
+
+  const completedTransferIdRef = useRef<string | null>(null);
+  const downloadUrlRef = useRef<string | null>(null);
 
   const sendMessage = useCallback((message: ClientMessage) => {
     const socket = socketRef.current;
@@ -59,6 +88,23 @@ function App() {
   const handleControlMessage = useCallback((message: ControlMessage) => {
 
     if (message.type === "file-offer") {
+      receivedChunksRef.current = [];
+      setReceivedBytes(0);
+      setSenderCompletedBytes(null);
+      setExpectedHash(null);
+      setVerificationStatus("idle");
+      verificationStartedRef.current = null;
+
+      // cleanup any previous download offer
+      completedTransferIdRef.current = null;
+      if (downloadUrlRef.current) {
+        URL.revokeObjectURL(downloadUrlRef.current);
+        downloadUrlRef.current = null;
+      }
+
+      setCompletedDownload(null);
+
+
       setIncomingOffer(message);
       setIncomingDecision("pending");
       setLastMessage(`Received an offer for ${message.name}.`);
@@ -89,14 +135,51 @@ function App() {
 
       setLastMessage(`Peer rejected the offer: ${message.reason}`);
     }
-  }, []);
+
+    if (message.type === "file-complete") {
+      if (incomingOffer?.transferId !== message.transferId) {
+        return;
+      }
+
+      setExpectedHash(message.sha256);
+      setSenderCompletedBytes(message.byteCount);
+      setLastMessage(
+        `Peer finished sending ${message.byteCount} bytes. Checking received data.`,
+      );
+    }
+
+    if (message.type === "file-verified") {
+      setOutgoingOffer((currentOffer) => {
+        if (currentOffer?.transferId !== message.transferId) {
+          return currentOffer;
+        }
+
+        return { ...currentOffer, status: "verified" };
+      });
+
+      setLastMessage("Peer verified the received file hash.");
+      return;
+    }
+
+    if (message.type === "file-integrity-failed") {
+      setOutgoingOffer((currentOffer) => {
+        if (currentOffer?.transferId !== message.transferId) {
+          return currentOffer;
+        }
+
+        return { ...currentOffer, status: "failed" };
+      });
+
+      setLastMessage("Peer reported that file verification failed.");
+    }
+
+  }, [incomingOffer]);
 
   const handleFileData = useCallback((data: ArrayBuffer) => {
-    const bytes = Array.from(new Uint8Array(data).slice(0, 8));
+    // Keep chunks for reconstruction into a downloadable file in the next step.
 
-    setLastFileData(
-      `Received ${data.byteLength} binary bytes. First bytes: [${bytes.join(", ")}].`,
-    );
+    receivedChunksRef.current.push(data);
+    setReceivedBytes((currentBytes) => currentBytes + data.byteLength);
   }, []);
 
   const { webRtcStatus, startHostConnection, handleSignal, sendControlMessage, controlChannelStatus, sendFileData } = usePeerConnection(sendMessage, handleControlMessage, handleFileData);
@@ -199,6 +282,83 @@ function App() {
     };
   }, []);
 
+  // when sender and receiver have both sent and received the entire file, create a downloadable URL
+
+  useEffect(() => {
+    if (
+      !incomingOffer ||
+      !expectedHash ||
+      senderCompletedBytes !== incomingOffer.size ||
+      receivedBytes !== incomingOffer.size ||
+      verificationStartedRef.current === incomingOffer.transferId
+    ) {
+      return;
+    }
+
+    verificationStartedRef.current = incomingOffer.transferId;
+    setVerificationStatus("verifying");
+
+    void (async () => {
+      const blob = new Blob(receivedChunksRef.current, {
+        type: incomingOffer.mimeType || "application/octet-stream",
+      });
+
+      const actualHash = await sha256Hex(blob);
+
+      if (actualHash !== expectedHash) {
+        setVerificationStatus("failed");
+        setLastMessage("File verification failed.");
+
+        sendControlMessage({
+          type: "file-integrity-failed",
+          transferId: incomingOffer.transferId,
+          expectedHash,
+          actualHash,
+        });
+
+        return;
+      }
+
+      if (downloadUrlRef.current) {
+        URL.revokeObjectURL(downloadUrlRef.current);
+      }
+
+      const url = URL.createObjectURL(blob);
+
+      downloadUrlRef.current = url;
+      completedTransferIdRef.current = incomingOffer.transferId;
+
+      setCompletedDownload({
+        name: incomingOffer.name,
+        url,
+      });
+
+      setVerificationStatus("verified");
+      setLastMessage(`${incomingOffer.name} passed SHA-256 verification.`);
+
+      sendControlMessage({
+        type: "file-verified",
+        transferId: incomingOffer.transferId,
+        sha256: actualHash,
+      });
+    })();
+  }, [
+    expectedHash,
+    incomingOffer,
+    receivedBytes,
+    sendControlMessage,
+    senderCompletedBytes,
+  ]);
+
+  useEffect(() => {
+    // cleanup the blob URL when the component unmounts
+    return () => {
+      if (downloadUrlRef.current) {
+        URL.revokeObjectURL(downloadUrlRef.current);
+      }
+    };
+  }, []);
+
   const roomLink = roomId ? `${window.location.origin}/?room=${roomId}` : null;
 
   function createRoom() {
@@ -234,8 +394,8 @@ function App() {
 
     if (!file) return;
 
-    if (outgoingOffer) {
-      setLastMessage("Wait for the current file offer to be decided.");
+    if (outgoingOffer && !isTerminalTransferStatus(outgoingOffer.status)) {
+      setLastMessage("Wait for the current file transfer to finish.");
       event.target.value = "";
       return;
     }
@@ -255,6 +415,7 @@ function App() {
       return;
     }
 
+    setSentBytes(0);
     setOutgoingOffer({ transferId, file, status: "waiting" });
     setLastMessage(`Offered ${file.name} directly to the peer.`);
 
@@ -297,24 +458,73 @@ function App() {
     setLastMessage(`Rejected ${incomingOffer.name}.`);
   }
 
-  async function sendFirstFileChunk() {
+  async function sendFileInChunks() {
     if (!outgoingOffer || outgoingOffer.status !== "accepted") {
       setLastMessage("A peer must accept the file before sending bytes.");
       return;
     }
 
-    // slice creates a Blob view; arrayBuffer reads only this bounded portion.
-    const firstChunk = await outgoingOffer.file
-      .slice(0, FILE_CHUNK_SIZE)
-      .arrayBuffer();
+    const { file, transferId } = outgoingOffer;
 
-    const sent = sendFileData(firstChunk);
+    setOutgoingOffer((currentOffer) => {
+      if (currentOffer?.transferId !== transferId) return currentOffer;
+      return { ...currentOffer, status: "sending" };
+    });
 
-    setLastMessage(
-      sent
-        ? `Sent the first ${firstChunk.byteLength} bytes directly.`
-        : "The file channel is not ready yet.",
-    );
+    try {
+      let offset = 0;
+
+      while (offset < file.size) {
+        const chunk = await file
+          .slice(offset, offset + FILE_CHUNK_SIZE)
+          .arrayBuffer();
+
+        const sent = await sendFileData(chunk);
+
+        if (!sent) {
+          throw new Error("The file channel is no longer open.");
+        }
+
+        offset += chunk.byteLength;
+        setSentBytes(offset);
+      }
+
+      setOutgoingOffer((currentOffer) => {
+        if (currentOffer?.transferId !== transferId) return currentOffer;
+        return { ...currentOffer, status: "hashing" };
+      });
+
+      const sha256 = await sha256Hex(file);
+
+      const completionSent = sendControlMessage({
+        type: "file-complete",
+        transferId,
+        byteCount: file.size,
+        sha256,
+      });
+
+      if (!completionSent) {
+        throw new Error("Could not send the file completion message.");
+      }
+
+      setOutgoingOffer((currentOffer) => {
+        if (currentOffer?.transferId !== transferId) return currentOffer;
+        return { ...currentOffer, status: "complete-sent" };
+      });
+
+      setLastMessage(`Sent all ${file.size} bytes and completion metadata.`);
+
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "Unknown transfer error.";
+
+      setOutgoingOffer((currentOffer) => {
+        if (currentOffer?.transferId !== transferId) return currentOffer;
+        return { ...currentOffer, status: "failed" };
+      });
+
+      setLastMessage(`File transfer stopped: ${message}`);
+    }
   }
 
   return (
@@ -330,13 +540,10 @@ function App() {
           <span className="status-dot" />
           <span>{connectionStatus}</span>
         </div>
-        <p className="hint">WebRTC: {webRtcStatus}</p>
-
-        {role && (
-          <p className="hint">
-            Direct control channel: {controlChannelStatus}
-          </p>
-        )}
+        <div className="connection-details">
+          <span>WebRTC: {webRtcStatus}</span>
+          {role && <span>Control: {controlChannelStatus}</span>}
+        </div>
 
         <RoomPanel
           connectionStatus={connectionStatus}
@@ -352,57 +559,22 @@ function App() {
           onRejectJoin={rejectJoin}
         />
 
-        {role && controlChannelStatus === "open" && (
-          <section className="room">
-            <p className="label">Offer a file</p>
-            <input type="file" onChange={offerSelectedFile} />
-
-            {outgoingOffer && (
-              <>
-                <p className="hint">
-                  {outgoingOffer.file.name}: {outgoingOffer.status}
-                </p>
-
-                {outgoingOffer.status === "accepted" && (
-                  <button onClick={() => void sendFirstFileChunk()}>
-                    Send first 64 KiB
-                  </button>
-                )}
-              </>
-            )}
-
-            {incomingOffer && (
-              <div className="room">
-                <p className="label">Incoming file offer</p>
-                <p>{incomingOffer.name}</p>
-                <p className="hint">
-                  {incomingOffer.size} bytes ·{" "}
-                  {incomingOffer.mimeType || "unknown file type"}
-                  {incomingDecision === "pending" && (
-                    <div className="actions">
-                      <button onClick={acceptIncomingOffer}>Accept</button>
-                      <button
-                        className="secondary-button"
-                        onClick={rejectIncomingOffer}
-                      >
-                        Reject
-                      </button>
-                    </div>
-                  )}
-
-                  {incomingDecision === "accepted" && (
-                    <p className="hint">
-                      Accepted. {lastFileData}
-                    </p>
-                  )}
-
-                  {incomingDecision === "rejected" && (
-                    <p className="hint">Offer rejected.</p>
-                  )}
-                </p>
-              </div>
-            )}
-          </section>
+        {role && (
+          <TransferPanel
+            controlChannelStatus={controlChannelStatus}
+            outgoingOffer={outgoingOffer}
+            incomingOffer={incomingOffer}
+            incomingDecision={incomingDecision}
+            verificationStatus={verificationStatus}
+            sentBytes={sentBytes}
+            receivedBytes={receivedBytes}
+            senderCompletedBytes={senderCompletedBytes}
+            completedDownload={completedDownload}
+            onOfferSelectedFile={offerSelectedFile}
+            onSendFile={sendFileInChunks}
+            onAcceptIncomingOffer={acceptIncomingOffer}
+            onRejectIncomingOffer={rejectIncomingOffer}
+          />
         )}
 
         <p className="message">Last event: {lastMessage}</p>

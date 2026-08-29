@@ -18,11 +18,24 @@ const ICE_SERVERS: RTCIceServer[] = [
   { urls: "stun:stun.l.google.com:19302" },
 ];
 
+const FILE_BUFFER_HIGH_WATER_MARK = 512 * 1024;
+const FILE_BUFFER_LOW_WATER_MARK = 256 * 1024;
+
 // Manages the WebRTC connection lifecycle, data channel setup, and SDP/ICE signaling.
 export function usePeerConnection(sendMessage: SendMessage, onControlMessage: ControlMessageHandler, onFileData: FileDataHandler) {
   const peerConnectionRef = useRef<RTCPeerConnection | null>(null);
   // Candidates may arrive over signaling before remoteDescription is set; queue them here.
   const pendingIceCandidatesRef = useRef<RTCIceCandidateInit[]>([]);
+  const onControlMessageRef = useRef(onControlMessage);
+  const onFileDataRef = useRef(onFileData);
+
+  useEffect(() => {
+    onControlMessageRef.current = onControlMessage;
+  }, [onControlMessage]);
+
+  useEffect(() => {
+    onFileDataRef.current = onFileData;
+  }, [onFileData]);
 
   const [webRtcStatus, setWebRtcStatus] = useState("Not started");
   const [controlChannel, setControlChannel] = useState<RTCDataChannel | null>(null);
@@ -51,7 +64,7 @@ export function usePeerConnection(sendMessage: SendMessage, onControlMessage: Co
           const message: unknown = JSON.parse(event.data);
 
           if (isControlMessage(message)) {
-            onControlMessage(message);
+            onControlMessageRef.current(message);
           }
         } catch {
           console.warn("Received invalid control-channel JSON.");
@@ -61,18 +74,19 @@ export function usePeerConnection(sendMessage: SendMessage, onControlMessage: Co
 
     if (channel.label === "file") {
       setFileChannel(channel);
+      channel.bufferedAmountLowThreshold = FILE_BUFFER_LOW_WATER_MARK;
 
       // the file channel carries raw bytes, never JSON control messages.
       channel.onmessage = (event) => {
         if (event.data instanceof ArrayBuffer) {
-          onFileData(event.data);
+          onFileDataRef.current(event.data);
           return;
         }
 
         console.warn("Received unexpected data on file channel:", event.data);
       };
     }
-  }, [onControlMessage, onFileData]);
+  }, []);
 
   const resetPeerConnection = useCallback((peerConnection: RTCPeerConnection) => {
     peerConnection.close();
@@ -268,14 +282,53 @@ export function usePeerConnection(sendMessage: SendMessage, onControlMessage: Co
     return true;
   }, [controlChannel]);
 
-  const sendFileData = useCallback((data: ArrayBuffer) => {
-    if (!fileChannel || fileChannel.readyState !== "open") {
+  const waitForFileBufferDrain = useCallback((channel: RTCDataChannel) => {
+    if (channel.bufferedAmount <= FILE_BUFFER_HIGH_WATER_MARK) {
+      return Promise.resolve();
+    }
+
+    return new Promise<void>((resolve, reject) => {
+      const cleanup = () => {
+        channel.removeEventListener("bufferedamountlow", onBufferLow);
+        channel.removeEventListener("close", onClose);
+      };
+
+      const onBufferLow = () => {
+        cleanup();
+        resolve();
+      };
+
+      const onClose = () => {
+        cleanup();
+        reject(new Error("The file channel closed during transfer."));
+      };
+
+      channel.addEventListener("bufferedamountlow", onBufferLow);
+      channel.addEventListener("close", onClose);
+
+      // Handle the small race where the buffer drained before listeners attached.
+      if (channel.bufferedAmount <= FILE_BUFFER_LOW_WATER_MARK) {
+        onBufferLow();
+      }
+    });
+  }, []);
+
+  const sendFileData = useCallback(async (data: ArrayBuffer) => {
+    const channel = fileChannel;
+
+    if (!channel || channel.readyState !== "open") {
       return false;
     }
 
-    fileChannel.send(data);
+    await waitForFileBufferDrain(channel);
+
+    if (channel.readyState !== "open") {
+      return false;
+    }
+
+    channel.send(data);
     return true;
-  }, [fileChannel]);
+  }, [fileChannel, waitForFileBufferDrain]);
 
   return {
     webRtcStatus,
