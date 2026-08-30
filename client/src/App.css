@@ -12,8 +12,8 @@
 }
 
 .card {
-  width: min(100%, 460px);
-  padding: 32px;
+  width: min(100%, 620px);
+  padding: 36px;
   border: 1px solid #deded9;
   border-radius: 16px;
   background: #ffffff;
@@ -46,7 +46,7 @@ h1 {
   display: flex;
   align-items: center;
   gap: 8px;
-  margin-bottom: 20px;
+  margin-bottom: 8px;
   font-size: 0.9rem;
 }
 
@@ -69,18 +69,33 @@ button {
   cursor: pointer;
 }
 
+button:hover:not(:disabled) {
+  background: #30302e;
+}
+
 button:disabled {
   cursor: not-allowed;
   opacity: 0.45;
 }
 
-.room {
-  padding: 16px;
-  border-radius: 10px;
-  background: #f2f2ef;
+.connection-details {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 16px;
+  margin: 0 0 24px;
+  color: #77776f;
+  font-size: 0.82rem;
 }
 
-.room code {
+.room-panel,
+.transfer-panel {
+  padding: 18px;
+  border: 1px solid #e6e6e1;
+  border-radius: 12px;
+  background: #fafaf8;
+}
+
+.room-panel code {
   display: block;
   margin: 8px 0;
   overflow-wrap: anywhere;
@@ -101,6 +116,8 @@ button:disabled {
 
 .join-request {
   margin-top: 16px;
+  border-color: #d6dfd5;
+  background: #f6faf5;
 }
 
 .actions {
@@ -113,4 +130,111 @@ button:disabled {
 .secondary-button {
   background: #e8e8e4;
   color: #171717;
+}
+
+.secondary-button:hover:not(:disabled) {
+  background: #dcdcd7;
+}
+
+.transfer-panel {
+  display: grid;
+  gap: 14px;
+  margin-top: 16px;
+}
+
+.transfer-empty {
+  display: grid;
+  gap: 6px;
+}
+
+.file-picker {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.file-picker .hint {
+  margin-top: 4px;
+}
+
+.file-button {
+  flex: 0 0 auto;
+  border-radius: 9px;
+  padding: 10px 14px;
+  background: #171717;
+  color: #fff;
+  font-size: 0.86rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.file-button:hover {
+  background: #30302e;
+}
+
+.file-button input {
+  display: none;
+}
+
+.transfer-card {
+  display: grid;
+  gap: 10px;
+  padding-top: 14px;
+  border-top: 1px solid #e6e6e1;
+}
+
+.transfer-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.file-name {
+  margin: 5px 0 0;
+  overflow-wrap: anywhere;
+  font-weight: 700;
+}
+
+.transfer-state {
+  flex: 0 0 auto;
+  border-radius: 999px;
+  padding: 4px 8px;
+  background: #e8e8e4;
+  color: #5e5e59;
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-transform: capitalize;
+}
+
+.download-link {
+  display: inline-flex;
+  width: fit-content;
+  border-radius: 9px;
+  padding: 10px 14px;
+  background: #e7f4ec;
+  color: #145c35;
+  font-size: 0.86rem;
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.download-link:hover {
+  background: #d9ecdf;
+}
+
+@media (max-width: 540px) {
+  .app {
+    padding: 14px;
+  }
+
+  .card {
+    padding: 24px 20px;
+  }
+
+  .file-picker {
+    align-items: flex-start;
+    flex-direction: column;
+  }
 }
