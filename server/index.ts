@@ -1,4 +1,5 @@
 import type { ServerWebSocket } from "bun";
+import { parseClientMessage } from "./protocol";
 
 type SocketRole = "host" | "pending-guest" | "guest";
 
@@ -16,106 +17,11 @@ type Room = {
     createdAt: number;
 };
 
-type CreateRoomMessage = {
-    type: "create-room";
-};
-
-type JoinRoomMessage = {
-    type: "join-room";
-    roomId: string;
-};
-
-type ApproveJoinMessage = {
-    type: "approve-join";
-};
-
-type RejectJoinMessage = {
-    type: "reject-join";
-};
-
-type SignalKind = "offer" | "answer" | "ice-candidate";
-
-type SignalPayload = {
-    kind: SignalKind;
-    data: Record<string, unknown>;
-};
-
-type SignalMessage = {
-    type: "signal";
-    signal: SignalPayload;
-};
-
-type ClientMessage =
-    | CreateRoomMessage
-    | JoinRoomMessage
-    | ApproveJoinMessage
-    | RejectJoinMessage
-    | SignalMessage;
-
 const rooms = new Map<string, Room>();
+const port = Number(Bun.env.PORT ?? 8080);
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-    return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-function isSignalKind(value: unknown): value is SignalKind {
-    return (
-        value === "offer" ||
-        value === "answer" ||
-        value === "ice-candidate"
-    );
-}
-
-//checks the message, doesnt trust it.
-function parseClientMessage(rawMessage: unknown): ClientMessage | null {
-    if (typeof rawMessage !== "string") {
-        return null;
-    }
-
-    try {
-        const value: unknown = JSON.parse(rawMessage);
-
-        if (
-            typeof value !== "object" || value === null || !("type" in value)) {
-            return null;
-        }
-
-        if (value.type === "create-room") {
-            return { type: "create-room" };
-        }
-
-        if (value.type === "join-room" && "roomId" in value && typeof value.roomId === "string") {
-            return {
-                type: "join-room",
-                roomId: value.roomId,
-            };
-        }
-
-        if (value.type === "approve-join") {
-            return { type: "approve-join" };
-        }
-
-        if (value.type === "reject-join") {
-            return { type: "reject-join" };
-        }
-
-        if (value.type === "signal" && "signal" in value
-            && isRecord(value.signal) && isSignalKind(value.signal.kind)
-            && "data" in value.signal && isRecord(value.signal.data)) {
-            return {
-                type: "signal",
-                signal: {
-                    kind: value.signal.kind,
-                    data: value.signal.data,
-                },
-            };
-        }
-
-
-        return null;
-    } catch {
-        return null;
-    }
+if (!Number.isInteger(port) || port < 1 || port > 65_535) {
+    throw new Error("PORT must be a valid TCP port number.");
 }
 
 function sendJson(ws: ServerWebSocket<SocketData>, message: object) {
@@ -123,7 +29,7 @@ function sendJson(ws: ServerWebSocket<SocketData>, message: object) {
 }
 
 const server = Bun.serve<SocketData>({
-    port: 8080,
+    port,
 
     fetch(request, bunServer) {
         const url = new URL(request.url);
@@ -203,6 +109,34 @@ const server = Bun.serve<SocketData>({
                     type: "room-created",
                     roomId,
                 });
+            }
+
+            if (message.type === "leave-room") {
+                const roomId = ws.data.roomId;
+                const room = roomId ? rooms.get(roomId) : undefined;
+
+                if (room?.host === ws) {
+                    const otherPeer = room.pendingGuest ?? room.guest;
+                    if (otherPeer) {
+                        otherPeer.data.roomId = undefined;
+                        otherPeer.data.role = undefined;
+                        sendJson(otherPeer, { type: "room-closed", reason: "The room host left." });
+                    }
+                    rooms.delete(room.id);
+                } else if (room?.guest === ws) {
+                    room.host.data.roomId = undefined;
+                    room.host.data.role = undefined;
+                    rooms.delete(room.id);
+                    sendJson(room.host, { type: "room-closed", reason: "The approved peer left." });
+                } else if (room?.pendingGuest === ws) {
+                    room.pendingGuest = undefined;
+                    sendJson(room.host, { type: "join-cancelled", roomId: room.id });
+                }
+
+                ws.data.roomId = undefined;
+                ws.data.role = undefined;
+                sendJson(ws, { type: "room-closed", reason: "You left the room." });
+                return;
             }
 
             if (message.type === "join-room") {
@@ -377,6 +311,8 @@ const server = Bun.serve<SocketData>({
                 const otherPeer = room.pendingGuest ?? room.guest;
 
                 if (otherPeer) {
+                    otherPeer.data.roomId = undefined;
+                    otherPeer.data.role = undefined;
                     sendJson(otherPeer, {
                         type: "room-closed",
                         reason: "The room host disconnected.",
@@ -397,15 +333,18 @@ const server = Bun.serve<SocketData>({
 
                 console.log(`Join request cancelled for room ${room.id}`);
             } else if (room?.guest === ws) {
-                // Keep the host's room available for a future guest.
-                room.guest = undefined;
+
+                // an approved peer leaving ends the entire room.
+                room.host.data.roomId = undefined;
+                room.host.data.role = undefined;
+                rooms.delete(room.id);
 
                 sendJson(room.host, {
-                    type: "peer-left",
-                    roomId: room.id,
+                    type: "room-closed",
+                    reason: "The approved peer disconnected. Create a new room to continue.",
                 });
 
-                console.log(`Guest left room ${room.id}`);
+                console.log(`Deleted room ${room.id} after guest disconnect`);
             }
 
             console.log(`WebSocket closed with code ${code}`);
