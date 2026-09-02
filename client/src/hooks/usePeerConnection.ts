@@ -55,7 +55,14 @@ export function usePeerConnection(sendMessage: SendMessage, onControlMessage: Co
       }
 
       channel.onopen = updateControlChannelStatus;
-      channel.onclose = updateControlChannelStatus;
+      channel.onclose = () => {
+        updateControlChannelStatus();
+
+        // A remote channel close is an interruption; local cleanup clears the ref first.
+        if (peerConnectionRef.current) {
+          window.dispatchEvent(new Event("fullsend-peer-interrupted"));
+        }
+      };
 
       channel.onmessage = (event) => {
         if (typeof event.data !== "string") return;
@@ -111,6 +118,10 @@ export function usePeerConnection(sendMessage: SendMessage, onControlMessage: Co
     // ICE state tells us whether browsers found a usable network route.
     peerConnection.oniceconnectionstatechange = () => {
       setWebRtcStatus(`ICE: ${peerConnection.iceConnectionState}`);
+
+      if (peerConnection.iceConnectionState === "failed") {
+        window.dispatchEvent(new Event("fullsend-peer-interrupted"));
+      }
     };
 
     // Candidate gathering is separate from candidate connection testing.
@@ -174,6 +185,17 @@ export function usePeerConnection(sendMessage: SendMessage, onControlMessage: Co
     const message = error instanceof Error ? error.message : "Unknown WebRTC error.";
     setWebRtcStatus(`Failed: ${message}`);
     resetPeerConnection(peerConnection);
+    window.dispatchEvent(new Event("fullsend-peer-interrupted"));
+  }, [resetPeerConnection]);
+
+  const closePeerConnection = useCallback(() => {
+    const peerConnection = peerConnectionRef.current;
+
+    if (peerConnection) {
+      resetPeerConnection(peerConnection);
+    }
+
+    setWebRtcStatus("Not started");
   }, [resetPeerConnection]);
 
   // Host initiates the connection: creates channels, generates SDP offer, and sends via signaling.
@@ -339,5 +361,6 @@ export function usePeerConnection(sendMessage: SendMessage, onControlMessage: Co
     sendControlMessage,
     controlChannelStatus,
     sendFileData,
+    closePeerConnection,
   };
 }
