@@ -1,0 +1,25 @@
+.room-panel {
+  padding: 18px;
+  border: 1px solid #e6e6e1;
+  border-radius: 12px;
+  background: #fafaf8;
+}
+
+.room-panel code {
+  display: block;
+  margin: 8px 0;
+  overflow-wrap: anywhere;
+  font-size: 0.8rem;
+}
+
+.room-panel button {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
+
+.join-request {
+  margin-top: 16px;
+  border-color: #d6dfd5;
+  background: #f6faf5;
+}

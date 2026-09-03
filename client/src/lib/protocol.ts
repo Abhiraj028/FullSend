@@ -7,26 +7,6 @@ export type SignalPayload = {
   data: unknown;
 };
 
-// Kept during the protocol migration so the single-file UI remains usable.
-export type FileOfferMessage = {
-  type: "file-offer";
-  transferId: string;
-  name: string;
-  size: number;
-  mimeType: string;
-};
-
-export type FileAcceptMessage = {
-  type: "file-accept";
-  transferId: string;
-};
-
-export type FileRejectMessage = {
-  type: "file-reject";
-  transferId: string;
-  reason: string;
-};
-
 export type BatchFile = {
   transferId: string;
   name: string;
@@ -82,9 +62,6 @@ export type FileIntegrityFailedMessage = {
 };
 
 export type ControlMessage =
-  | FileOfferMessage
-  | FileAcceptMessage
-  | FileRejectMessage
   | BatchOfferMessage
   | BatchAcceptMessage
   | BatchRejectMessage
@@ -200,28 +177,6 @@ function isBatchFiles(value: unknown): value is BatchFile[] {
 export function isControlMessage(value: unknown): value is ControlMessage {
   if (!isRecord(value) || typeof value.type !== "string") {
     return false;
-  }
-
-  if (value.type === "file-offer") {
-    return (
-      isNonEmptyString(value.transferId) &&
-      isNonEmptyString(value.name) &&
-      typeof value.size === "number" &&
-      Number.isSafeInteger(value.size) &&
-      value.size >= 0 &&
-      typeof value.mimeType === "string"
-    );
-  }
-
-  if (value.type === "file-accept") {
-    return isNonEmptyString(value.transferId);
-  }
-
-  if (value.type === "file-reject") {
-    return (
-      isNonEmptyString(value.transferId) &&
-      isNonEmptyString(value.reason)
-    );
   }
 
   if (value.type === "batch-offer") {
