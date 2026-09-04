@@ -25,6 +25,7 @@ export function useIncomingTransfer({
   reportEvent,
   reportConnectionError,
 }: Options) {
+  // Data-channel callbacks can outrun React renders, so refs own live protocol state.
   const incomingBatchRef = useRef<BatchOfferMessage | null>(null);
   const incomingDecisionRef = useRef<
     "pending" | "accepted" | "rejected" | null
@@ -139,6 +140,7 @@ export function useIncomingTransfer({
       if (!file || receiveFailedRef.current) return;
 
       const nextByteCount = receivedBytesRef.current + data.byteLength;
+      // Declared size is a protocol boundary: excess bytes terminate the peer connection.
       if (nextByteCount > file.size) {
         receiveFailedRef.current = true;
         receivedChunksRef.current = [];
@@ -160,6 +162,7 @@ export function useIncomingTransfer({
 
   useEffect(() => {
     const file = activeIncomingFile;
+    // Verify only after both the sender receipt and every declared byte have arrived.
     if (
       !file ||
       !expectedHash ||
@@ -223,6 +226,7 @@ export function useIncomingTransfer({
 
   useEffect(
     () => () => {
+      // Object URLs retain their Blob in memory until explicitly revoked.
       downloadUrlsRef.current.forEach((url) => URL.revokeObjectURL(url));
     },
     [],

@@ -17,6 +17,7 @@ type Room = {
     createdAt: number;
 };
 
+// Rooms exist only in memory: restarting the signaling service expires every room.
 const rooms = new Map<string, Room>();
 const port = Number(Bun.env.PORT ?? 8080);
 
@@ -288,7 +289,7 @@ const server = Bun.serve<SocketData>({
                     return;
                 }
 
-                // The server routes setup metadata but never creates a peer connection.
+                // The server routes setup metadata only; file bytes travel peer-to-peer.
                 sendJson(recipient, {
                     type: "signal",
                     signal: message.signal,

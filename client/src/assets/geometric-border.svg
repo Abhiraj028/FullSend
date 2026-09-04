@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 160 144">
+  <g fill="none" stroke-linejoin="round">
+    <path d="M0 72 40 12l40 60-40 60L0 72Zm80 0 40-60 40 60-40 60-40-60Z" fill="#f06449" stroke="#3b1d18" stroke-width="5"/>
+    <path d="M8 72 40 24l32 48-32 48L8 72Zm80 0 32-48 32 48-32 48-32-48Z" fill="#f6e8bd" stroke="#098d86" stroke-width="6"/>
+    <path d="M18 72 40 39l22 33-22 33-22-33Zm80 0 22-33 22 33-22 33-22-33Z" fill="#dc523e" stroke="#3b1d18" stroke-width="4"/>
+    <path d="m29 72 11-17 11 17-11 17-11-17Zm80 0 11-17 11 17-11 17-11-17Z" fill="#f6e8bd" stroke="#f6e8bd" stroke-width="2"/>
+    <path d="M0 111 20 82l20 30 20-30 20 29 20-29 20 30 20-30 20 29" stroke="#098d86" stroke-width="5"/>
+    <path d="M0 124 20 95l20 30 20-30 20 29 20-29 20 30 20-30 20 29" stroke="#3b1d18" stroke-width="3"/>
+  </g>
+  <g fill="#3b1d18">
+    <path d="m40 3 4 7-4 7-4-7 4-7Zm80 0 4 7-4 7-4-7 4-7Z"/>
+    <circle cx="20" cy="42" r="3"/><circle cx="60" cy="42" r="3"/>
+    <circle cx="100" cy="42" r="3"/><circle cx="140" cy="42" r="3"/>
+  </g>
+  <g fill="#098d86">
+    <path d="m20 30 4 7-4 7-4-7 4-7Zm80 0 4 7-4 7-4-7 4-7Z"/>
+    <path d="m60 30 4 7-4 7-4-7 4-7Zm80 0 4 7-4 7-4-7 4-7Z"/>
+  </g>
+</svg>

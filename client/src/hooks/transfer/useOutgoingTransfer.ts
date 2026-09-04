@@ -31,6 +31,7 @@ export function useOutgoingTransfer(
   const [sentBytes, setSentBytes] = useState(0);
 
   const replaceOutgoingBatch = useCallback((batch: OutgoingBatch | null) => {
+    // The ref is protocol truth for async callbacks; state is its UI projection.
     outgoingBatchRef.current = batch;
     setOutgoingBatch(batch);
   }, []);
@@ -40,6 +41,7 @@ export function useOutgoingTransfer(
     const file = batch?.files[batch.currentIndex];
     if (!batch || !file || batch.status !== "accepted") return;
 
+    // Do not emit binary data until the receiver has reset its buffers for this file.
     if (
       !sendControlMessage({ type: "file-start", transferId: file.transferId })
     ) {
@@ -84,6 +86,7 @@ export function useOutgoingTransfer(
         }
 
         replaceOutgoingBatch({ ...sendingBatch, status: "hashing" });
+        // Hash after streaming so verification does not delay the first byte sent.
         const sha256 = await sha256Hex(item.file);
         const hashingBatch = outgoingBatchRef.current;
         if (
@@ -148,6 +151,7 @@ export function useOutgoingTransfer(
         }
         replaceOutgoingBatch({ ...batch, status: "accepted" });
         reportEvent("Peer accepted the batch. Starting transfer.");
+        // Leave the current message handler before advancing the next protocol step.
         queueMicrotask(() => sendCurrentFileRef.current());
         return;
       }
@@ -279,6 +283,7 @@ export function useOutgoingTransfer(
       mimeType: file.mimeType,
     }));
 
+    // The offer contains metadata only; bytes wait for batch-accept and file-ready.
     if (
       !sendControlMessage({
         type: "batch-offer",

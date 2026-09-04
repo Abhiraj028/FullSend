@@ -25,7 +25,8 @@ export function useFileTransferSession(
   const closePeerConnectionRef = useRef<() => void>(() => {});
   const [connectionError, setConnectionError] = useState<string | null>(null);
 
-  // Stable proxies break the setup cycle between transfer state and WebRTC.
+  // Transfer hooks need WebRTC senders, while WebRTC needs their receive handlers.
+  // Stable proxies break that dependency cycle and are wired to the real functions below.
   const sendControlMessage = useCallback<SendControlMessage>(
     (message) => sendControlMessageRef.current(message),
     [],
@@ -60,6 +61,7 @@ export function useFileTransferSession(
 
   const handleControlMessage = useCallback(
     (message: ControlMessage) => {
+      // Both state machines inspect the same control packet and ignore irrelevant types.
       handleOutgoingControlMessage(message);
       handleIncomingControlMessage(message);
     },

@@ -20,6 +20,7 @@ function getRoomIdFromUrl() {
 
 function App() {
   const socketRef = useRef<WebSocket | null>(null);
+  // The socket subscribes once, while this ref always points at the latest React state.
   const messageHandlerRef = useRef<(message: ServerMessage) => void>(() => {});
   const [connectionStatus, setConnectionStatus] = useState("Connecting...");
   const [roomId, setRoomId] = useState(getRoomIdFromUrl);
@@ -95,6 +96,7 @@ function App() {
       }
 
       if (message.type === "signal" && message.signal) {
+        // Signaling only negotiates the route; file bytes never pass through this socket.
         setLastMessage(`Received ${message.signal.kind} signal.`);
         void handleSignal(message.signal);
         return;
@@ -150,6 +152,7 @@ function App() {
   const roomLink = roomId ? `${window.location.origin}/?room=${roomId}` : null;
 
   function startFresh() {
+    // Tell the server to release the room before discarding local state.
     sendMessage({ type: "leave-room" });
     window.location.assign(window.location.origin);
   }

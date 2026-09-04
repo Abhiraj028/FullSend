@@ -3,14 +3,35 @@
 }
 
 .app {
+  position: relative;
+  isolation: isolate;
   min-height: 100vh;
   display: grid;
   grid-template-columns: minmax(0, 1fr);
   place-items: center;
   padding: 24px;
   overflow-x: hidden;
-  background: #f7f7f5;
+  background:
+    radial-gradient(circle at 12% 18%, rgb(240 100 73 / 10%), transparent 26rem),
+    radial-gradient(circle at 88% 78%, rgb(9 141 134 / 9%), transparent 30rem),
+    #f8f1df;
   color: #171717;
+}
+
+/* A scalable border motif keeps the large background expressive without adding UI noise. */
+.app::before {
+  position: fixed;
+  z-index: -1;
+  right: 0;
+  bottom: -34px;
+  left: 0;
+  height: 220px;
+  background: url("./assets/geometric-border.svg") bottom / 244px auto repeat-x;
+  content: "";
+  opacity: 0.34;
+  pointer-events: none;
+  -webkit-mask-image: linear-gradient(to bottom, transparent, #000 38%);
+  mask-image: linear-gradient(to bottom, transparent, #000 38%);
 }
 
 .home-button {
@@ -41,13 +62,15 @@
 }
 
 .card {
+  position: relative;
   width: 100%;
   max-width: 620px;
   padding: 36px;
   border: 1px solid #deded9;
   border-radius: 16px;
-  background: #ffffff;
+  background: rgb(255 255 255 / 94%);
   box-shadow: 0 16px 45px rgb(23 23 23 / 8%);
+  backdrop-filter: blur(10px);
 }
 
 .card:has(.transfer-panel) {
@@ -192,6 +215,13 @@ button:disabled {
   .home-button {
     top: 10px;
     left: 10px;
+  }
+
+  .app::before {
+    bottom: -18px;
+    height: 150px;
+    background-size: 190px auto;
+    opacity: 0.27;
   }
 
   .connection-error {
