@@ -3,6 +3,7 @@ import "./App.css";
 import { RoomPanel } from "./components/RoomPanel";
 import { TransferPanel } from "./components/TransferPanel";
 import { useFileTransferSession } from "./hooks/useFileTransferSession";
+import { SIGNALING_URL } from "./lib/config";
 import {
   parseServerMessage,
   type ClientMessage,
@@ -10,8 +11,6 @@ import {
   type RoomRole,
   type ServerMessage,
 } from "./lib/protocol";
-
-const SIGNALING_URL = "ws://localhost:8080/ws";
 
 function getRoomIdFromUrl() {
   return (
