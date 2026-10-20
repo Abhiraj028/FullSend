@@ -1,0 +1,235 @@
+* {
+  box-sizing: border-box;
+}
+
+.app {
+  position: relative;
+  isolation: isolate;
+  min-height: 100vh;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  place-items: center;
+  padding: 24px;
+  overflow-x: hidden;
+  background:
+    radial-gradient(circle at 12% 18%, rgb(240 100 73 / 10%), transparent 26rem),
+    radial-gradient(circle at 88% 78%, rgb(9 141 134 / 9%), transparent 30rem),
+    #f8f1df;
+  color: #171717;
+}
+
+/* A scalable border motif keeps the large background expressive without adding UI noise. */
+.app::before {
+  position: fixed;
+  z-index: -1;
+  right: 0;
+  bottom: -34px;
+  left: 0;
+  height: 220px;
+  background: url("./assets/geometric-border.svg") bottom / 244px auto repeat-x;
+  content: "";
+  opacity: 0.34;
+  pointer-events: none;
+  -webkit-mask-image: linear-gradient(to bottom, transparent, #000 38%);
+  mask-image: linear-gradient(to bottom, transparent, #000 38%);
+}
+
+.home-button {
+  position: fixed;
+  z-index: 10;
+  top: 18px;
+  left: 18px;
+  display: grid;
+  width: 44px;
+  height: 44px;
+  place-items: center;
+  padding: 0;
+  border: 1px solid #deded9;
+  border-radius: 50%;
+  background: rgb(255 255 255 / 92%);
+  color: #171717;
+  box-shadow: 0 6px 20px rgb(23 23 23 / 8%);
+  backdrop-filter: blur(8px);
+}
+
+.home-button svg {
+  width: 19px;
+  fill: currentcolor;
+}
+
+.home-button:hover:not(:disabled) {
+  background: #f0f0ec;
+}
+
+.card {
+  position: relative;
+  width: 100%;
+  max-width: 620px;
+  padding: 36px;
+  border: 1px solid #deded9;
+  border-radius: 16px;
+  background: rgb(255 255 255 / 94%);
+  box-shadow: 0 16px 45px rgb(23 23 23 / 8%);
+  backdrop-filter: blur(10px);
+}
+
+.card:has(.transfer-panel) {
+  max-width: 1120px;
+  min-width: 0;
+}
+
+.eyebrow,
+.label {
+  margin: 0;
+  color: #77776f;
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+h1 {
+  margin: 10px 0;
+  font-size: 2rem;
+  letter-spacing: -0.05em;
+}
+
+.description {
+  margin: 0 0 28px;
+  color: #5e5e59;
+  line-height: 1.5;
+}
+
+.status-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+  font-size: 0.9rem;
+}
+
+.status-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: #26a269;
+}
+
+button {
+  width: 100%;
+  border: 0;
+  border-radius: 10px;
+  padding: 12px 16px;
+  background: #171717;
+  color: #ffffff;
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+button:hover:not(:disabled) {
+  background: #30302e;
+}
+
+button:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+.connection-details {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 16px;
+  margin: 0 0 24px;
+  color: #77776f;
+  font-size: 0.82rem;
+}
+
+.connection-error {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  margin-bottom: 22px;
+  padding: 14px;
+  border: 1px solid #e7c3bd;
+  border-radius: 10px;
+  background: #fff6f4;
+  color: #71372f;
+}
+
+.connection-error div {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.connection-error span {
+  font-size: 0.8rem;
+  line-height: 1.45;
+}
+
+.connection-error button {
+  flex: 0 0 auto;
+  width: auto;
+  padding: 9px 12px;
+}
+
+.hint,
+.message {
+  margin: 0;
+  color: #77776f;
+  font-size: 0.82rem;
+  line-height: 1.5;
+}
+
+.message {
+  margin-top: 24px;
+}
+
+.actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  margin-top: 16px;
+}
+
+.secondary-button {
+  background: #e8e8e4;
+  color: #171717;
+}
+
+.secondary-button:hover:not(:disabled) {
+  background: #dcdcd7;
+}
+
+@media (max-width: 540px) {
+  .app {
+    padding: 64px 14px 14px;
+  }
+
+  .card {
+    padding: 24px 20px;
+  }
+
+  .home-button {
+    top: 10px;
+    left: 10px;
+  }
+
+  .app::before {
+    bottom: -18px;
+    height: 150px;
+    background-size: 190px auto;
+    opacity: 0.27;
+  }
+
+  .connection-error {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .connection-error button {
+    width: 100%;
+  }
+}
